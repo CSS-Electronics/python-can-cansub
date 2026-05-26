@@ -53,8 +53,8 @@ Example of using `detect_available_configs` to automatically discover (uses mDNS
 ```python
 configs = can.detect_available_configs(interfaces=["cansub"])
 # e.g. [{"interface": "cansub", "channel": "aabbccdd-usb.local@1"},
-#       {"interface": "cansub", "channel": "aabbccdd-usb.local@2"}
-#       {"interface": "cansub", "channel": "11223344-eth.local@1"}
+#       {"interface": "cansub", "channel": "aabbccdd-usb.local@2"},
+#       {"interface": "cansub", "channel": "11223344-eth.local@1"},
 #       {"interface": "cansub", "channel": "11223344-eth.local@2"}]
 ```
 
@@ -126,16 +126,13 @@ with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000, can_filters=
 
 `bus.recv()` blocks until a frame arrives. A `can.Notifier` runs a background thread that dispatches received frames to one or more *listeners*, allowing the main program to continue other work.
 
-python-can provides built-in listeners including `can.Printer` (print to stdout) and `can.Logger` (log to file). The example below logs to a CSV file while the main program continues. Custom listeners can be implemented by subclassing `can.Listener`.
+python-can provides built-in listeners including `can.Printer` (print to stdout) and `can.Logger` (log to file). The example below prints to stdout and logs to a CSV file while the main program continues. Custom listeners can be implemented by subclassing `can.Listener`.
 
 ```python
 from time import sleep
 
-print_listener = can.Printer()
-csv_listener = can.Logger("log.csv")
-
 with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus:
-    with can.Notifier([bus], listeners=[print_listener, csv_listener]):
+    with can.Notifier([bus], listeners=[can.Printer(), can.Logger("log.csv")]):
 
         # Perform other tasks here while frames are received in the background
         sleep(10)
