@@ -183,12 +183,14 @@ The common argument pattern for the CANsub:
 --interface cansub --channel aabbccdd-usb.local@1 --bitrate 250000 --data-bitrate 1000000
 ```
 
+Note that the *filter* argument supported by some command-line tools is limited to standard (11-bit) CAN IDs. Filtering on extended (29-bit) IDs requires the python-can API.
+
 ### can_logger
 
-Log received frames to a file (CSV by default; format inferred from file extension):
+Log received frames to a file (format inferred from file extension):
 
 ```bash
-can_logger --interface cansub --channel aabbccdd-usb.local@1 --bitrate 250000 --data-bitrate 1000000 --output-file log.csv
+can_logger --interface cansub --channel aabbccdd-usb.local@1 --bitrate 250000 --data-bitrate 1000000 --file_name log.csv
 ```
 
 ### can_player
@@ -207,13 +209,15 @@ Live terminal viewer showing received frames, updated counts, timestamps, and by
 can_viewer --interface cansub --channel aabbccdd-usb.local@1 --bitrate 250000 --data-bitrate 1000000
 ```
 
+On Windows, the can_viewer requires `windows-curses` (`pip install windows-curses`).
+
 ### can_bridge
 
 Forward all frames received on one bus to another (e.g. bridge two CANsub channels):
 
 ```bash
-can_bridge --interface cansub --channel aabbccdd-usb.local@1 --bitrate 250000 --data-bitrate 1000000 \
-           --interface2 cansub --channel2 aabbccdd-usb.local@2 --bitrate2 250000 --data-bitrate2 1000000
+can_bridge --bus1-interface cansub --bus1-channel aabbccdd-usb.local@1 --bus1-bitrate 250000 --bus1-data-bitrate 1000000 \
+           --bus2-interface cansub --bus2-channel aabbccdd-usb.local@2 --bus2-bitrate 250000 --bus2-data-bitrate 1000000
 ```
 
 ### can_logconvert

@@ -132,7 +132,7 @@ class CanSub(can.BusABC):
         del error_frames
 
         # Set channel info (required by python-can)
-        self.channel_info = f"CANSUB{self.channel}"
+        self.channel_info = f"{address}@{self.channel}"
 
         # Path to device root certificate
         self.cansub_cert = str(Path(__file__).with_name("cansub_root_cert.crt"))
@@ -453,9 +453,6 @@ class CanSub(can.BusABC):
         if timeout is not None and timeout < 0:
             raise can.exceptions.CanOperationError("Invalid timeout value")
 
-        if not (msg.channel is None or msg.channel == self.channel):
-            raise can.exceptions.CanOperationError("Invalid channel")
-
         try:
             if timeout is None:
                 # Wait indefinitely for queue space
@@ -474,7 +471,7 @@ class CanSub(can.BusABC):
         """
         See "recv" and "_recv_internal" in can.BusABC
 
-        Always return that message has already been filtered.
+        Always return that the message has already been filtered.
         """
         if timeout is not None and timeout < 0:
             raise can.exceptions.CanOperationError("Invalid timeout value")
@@ -531,9 +528,6 @@ class CanSub(can.BusABC):
         self.can_send_queue.queue.clear()
 
     def _apply_filters(self, filters: Optional[can.typechecking.CanFilters]) -> None:
-        """
-        NOTE: This python-can function does not take channel information (applies provided filters to all channels)
-        """
 
         # Python-can specify that all messages should be accepted if filters are None or empty list
         if filters is None or len(filters) == 0:
@@ -542,13 +536,13 @@ class CanSub(can.BusABC):
                 can.typechecking.CanFilter(extended=True,  can_id=0, can_mask=0)   # Accept all ext messages
             ]
 
-        # Change to CanSubHwFilter type
-        can_hw_filters = [CanSubHwFilter(is_extended=x["extended"],
+        # Change to CanSubHwFilter type. When "extended" field not provided, default to False (required by cmd-tools)
+        can_hw_filters = [CanSubHwFilter(is_extended=x.get("extended", False),
                                          is_range=False,
                                          f1=x["can_id"],
                                          f2=x["can_mask"]) for x in filters]
 
-        # Apply filters to all channels
+        # Apply hardware filter
         self.set_hw_filters(can_hw_filters)
 
     def set_hw_filters(self, can_hw_filters: Optional[CanSubHwFilters]) -> None:
