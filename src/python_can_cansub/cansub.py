@@ -14,6 +14,8 @@ from can.io.generic import TextIOMessageWriter, TextIOMessageReader
 from wsproto import ConnectionType, WSConnection, ConnectionState, events
 from python_can_cansub.cansub_protocol import cansub_protocol_decode, cansub_protocol_encode
 
+CANSUB_ROOT_CERT: Path = Path(__file__).with_name("cansub_root_cert.crt")
+
 class CanSubHwFilter(TypedDict):
     is_extended: bool
     is_range: bool
@@ -135,7 +137,7 @@ class CanSub(can.BusABC):
         self.channel_info = f"{address}@{self.channel}"
 
         # Path to device root certificate
-        self.cansub_cert = str(Path(__file__).with_name("cansub_root_cert.crt"))
+        self.cansub_cert = str(CANSUB_ROOT_CERT)
 
         # Perform REST interaction with the device in a persistent session
         self.api_url = f"https://{host}:{port}/api"
@@ -178,6 +180,16 @@ class CanSub(can.BusABC):
         # Ensure that no hardware filters are set before the channel is opened
         # (Ensures that no messages get through until provided filters are set)
         self.set_hw_filters(None)
+
+        # Ensure that no transmit-sequences are configured before the channel is opened
+        try:
+            response = self.session.get(f"{self.api_url}/can/{self.channel}/transmit", timeout=self._net_timeout)
+            response.raise_for_status()
+            for transmit_id in response.json():
+                response = self.session.delete(f"{self.api_url}/can/{self.channel}/transmit/{transmit_id}", timeout=self._net_timeout)
+                response.raise_for_status()
+        except Exception as e:
+            raise can.exceptions.CanInitializationError(f"Failed to clear transmit sequences ({e})")
 
         # Set channel configuration
         phy_config = {
@@ -883,4 +895,3 @@ def register_cansub_csv_writer():
     from can.io.player import MESSAGE_READERS
     MESSAGE_WRITERS[".csv"] = CanSubCSVWriter
     MESSAGE_READERS[".csv"] = CanSubCSVReader
-
