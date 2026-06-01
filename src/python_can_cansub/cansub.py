@@ -722,7 +722,8 @@ class CyclicSendTask(LimitedDurationCyclicSendTaskABC, RestartableCyclicTaskABC)
         spacing_ms = int(self.period_ns / 1_000_000)
 
         if self.duration is None:
-            limit = 0xFFFFFFFF
+            # Use max value (0xFFFFFFFF - 1) when duration is not provided.
+            limit = 0xFFFFFFFE
         else:
             limit = int(duration * 1000 / period_ms)
             limit = max(1, limit)
