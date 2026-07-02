@@ -8,10 +8,12 @@ import threading
 from pathlib import Path
 from datetime import datetime, timezone
 from time import time, sleep
-from typing import Optional, Sequence, TypedDict, Union, Callable, Generator, Any
+from typing import Optional, Sequence, Tuple, TypedDict, Union, Callable, Generator, Any
 from can import LimitedDurationCyclicSendTaskABC, BusABC, RestartableCyclicTaskABC
 from can.io.generic import TextIOMessageWriter, TextIOMessageReader
 from wsproto import ConnectionType, WSConnection, ConnectionState, events
+from zeroconf import InterfacesType, ServiceListener, Zeroconf, ServiceBrowser, InterfaceChoice, IPVersion
+
 from python_can_cansub.cansub_protocol import cansub_protocol_decode, cansub_protocol_encode
 
 CANSUB_ROOT_CERT: Path = Path(__file__).with_name("cansub_root_cert.crt")
@@ -26,7 +28,7 @@ CanSubHwFilters = Sequence[CanSubHwFilter]
 
 class CanSub(can.BusABC):
 
-    _supported_api_versions = ["02.00"]
+    _supported_api_versions = ["03.00"]
     _can_protocol = can.CanProtocol.CAN_FD_NON_ISO
     _can_f_clock = 80_000_000
 
@@ -40,11 +42,23 @@ class CanSub(can.BusABC):
                  listen_only: Optional[bool] = False,
                  auto_reset: Optional[bool] = True,
                  error_frames: Optional[bool] = False,
+                 server_cert: Optional[Union[str, Path]] = CANSUB_ROOT_CERT,
+                 client_cert: Optional[Tuple[Union[str, Path], Union[str, Path]]] = None,
                  **kwargs: object
                  ):
         """
         Python-can compatible interface over a websocket connection. Functions bus.send and bus.recv are made
         thread-safe by using queues.
+
+        :param channel:
+            The CAN channel to use. Can be an integer or a string. If a string contains '@',
+            it can specify both the device address and the channel (e.g., 'aabbccdd-usb.local@1').
+
+        :param can_filters:
+            Optional hardware filters to apply.
+
+        :param address:
+            The hostname or IP address of the device. If not provided, it must be part of the `channel` string.
 
         :param timing:
             CAN-bus bit-timing. Takes precedence over bitrate and data_bitrate.
@@ -63,6 +77,18 @@ class CanSub(can.BusABC):
 
         :param error_frames:
             CAN-bus error frame reporting.
+
+        :param server_cert:
+            Path to the server (device) public certificate (.crt file). If None, server verification is turned off.
+            Defaults to the built-in CANsub root certificate.
+
+        :param client_cert:
+            Tuple of paths to the client certificate (.crt file) and the unencrypted private key (.key file)
+            (i.e. ('cert', 'key')). Password protection is not supported.
+            Required when TLS mutual authentication is enabled.
+
+        :param kwargs:
+            Extra arguments passed to the parent `can.BusABC` class.
 
         """
 
@@ -84,6 +110,41 @@ class CanSub(can.BusABC):
         else:
             host = address
             port = 443
+
+        # Server (device) certificate
+        if not isinstance(server_cert, (type(None), str, Path)):
+            raise can.exceptions.CanInitializationError("Invalid server_cert")
+
+        self.server_cert = Path(server_cert) if server_cert else None
+        del server_cert
+
+        if self.server_cert is not None:
+            if not self.server_cert.is_file():
+                raise can.exceptions.CanInitializationError(f"Server certificate not found: {self.server_cert}")
+            if self.server_cert.suffix.lower() != ".crt":
+                raise can.exceptions.CanInitializationError(f"Server certificate must be a .crt file: {self.server_cert}")
+
+        # Client certificate (mTLS)
+        if client_cert is not None:
+            if not (isinstance(client_cert, (tuple, list)) and len(client_cert) == 2
+                    and all(isinstance(p, (str, Path)) for p in client_cert)):
+                raise can.exceptions.CanInitializationError("Invalid client_cert")
+
+            self.client_cert = (Path(client_cert[0]), Path(client_cert[1]))
+        else:
+            self.client_cert = None
+        del client_cert
+
+        if self.client_cert is not None:
+            client_crt, client_key = self.client_cert
+            if not client_crt.is_file():
+                raise can.exceptions.CanInitializationError(f"Client certificate not found: {client_crt}")
+            if client_crt.suffix.lower() != ".crt":
+                raise can.exceptions.CanInitializationError(f"Client certificate must be a .crt file: {client_crt}")
+            if not client_key.is_file():
+                raise can.exceptions.CanInitializationError(f"Client key not found: {client_key}")
+            if client_key.suffix.lower() != ".key":
+                raise can.exceptions.CanInitializationError(f"Client key must be a .key file: {client_key}")
 
         # Channel
         self.channel = None
@@ -136,16 +197,14 @@ class CanSub(can.BusABC):
         # Set channel info (required by python-can)
         self.channel_info = f"{address}@{self.channel}"
 
-        # Path to device root certificate
-        self.cansub_cert = str(CANSUB_ROOT_CERT)
-
         # Perform REST interaction with the device in a persistent session
         self.api_url = f"https://{host}:{port}/api"
         self._net_timeout = 3.0
 
         # Create persistent session for REST API calls
         self.session = requests.Session()
-        self.session.verify = self.cansub_cert
+        self.session.verify = str(self.server_cert) if self.server_cert else False
+        self.session.cert = (str(self.client_cert[0]), str(self.client_cert[1])) if self.client_cert else None
 
         # Get api version (and test connection)
         try:
@@ -217,7 +276,15 @@ class CanSub(can.BusABC):
             raise can.exceptions.CanInitializationError(f"Failed to configure channel ({e})")
 
         # Socket TLS configuration
-        ssl_context = ssl.create_default_context(cafile=self.cansub_cert)
+        if self.server_cert:
+            ssl_context = ssl.create_default_context(cafile=self.server_cert)
+        else:
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+
+        if self.client_cert:
+            ssl_context.load_cert_chain(certfile=self.client_cert[0], keyfile=self.client_cert[1])
 
         # Socket
         self.ws_sock = ssl_context.wrap_socket(sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM), server_hostname=host)
@@ -655,8 +722,16 @@ class CanSub(can.BusABC):
 
     @staticmethod
     def _detect_available_configs() -> Sequence[can.typechecking.AutoDetectedConfig]:
-        from zeroconf import InterfaceChoice, ServiceBrowser, Zeroconf
+        return CanSub.mdns_discover(interfaces=InterfaceChoice.All)
 
+    @staticmethod
+    def mdns_discover(interfaces: InterfacesType = InterfaceChoice.All, discovery_time: float = 2.0) -> Sequence[can.typechecking.AutoDetectedConfig]:
+        """Discover available CANsub devices by performing a mDNS lookup.
+
+        @param interfaces: The interfaces to listen on. These must be either interface addresses or one of the zeroconf
+        InterfaceChoice enum values.
+        @return: A sequence of auto-detected CANbus configurations.
+        """
         # Collect DNS-SD service info objects keyed by service name.
         # The device firmware advertises _cansub._tcp with TXT records:
         #   api=<version>   - must match _supported_api_versions
@@ -665,7 +740,7 @@ class CanSub(can.BusABC):
         # e.g. 1b5b9343-usb.local (USB) or 1b5b9343-eth.local (Ethernet).
         discovered = {}
 
-        class _Listener:
+        class _Listener(ServiceListener):
             def add_service(self, zc, type_, name):
                 info = zc.get_service_info(type_, name)
                 if info:
@@ -673,12 +748,11 @@ class CanSub(can.BusABC):
             def remove_service(self, zc, type_, name): pass
             def update_service(self, zc, type_, name): pass
 
-        # Listen on all interfaces so devices on multiple USB/Ethernet links
-        # are all discovered (each CDC-NCM or Ethernet link is a separate interface).
-        zc = Zeroconf(interfaces=InterfaceChoice.All)
+        # Listen on all specified interfaces.
+        zc = Zeroconf(interfaces=interfaces, ip_version=IPVersion.V4Only, use_asyncio=False)
         try:
             ServiceBrowser(zc, "_cansub._tcp.local.", _Listener())
-            sleep(2.0)
+            sleep(discovery_time)
         finally:
             zc.close()
 
@@ -692,7 +766,13 @@ class CanSub(can.BusABC):
             }
 
             # Skip devices running an unsupported API version.
-            if txt.get("api") not in CanSub._supported_api_versions:
+            api_version = txt.get("api")
+            if api_version not in CanSub._supported_api_versions:
+                warnings.warn(
+                    f"Detected CANsub device {info.server.rstrip('.')} has an unsupported API version ({api_version}). "
+                    f"Supported versions: [{', '.join(CanSub._supported_api_versions)}]",
+                    UserWarning
+                )
                 continue
 
             # info.server has a trailing dot (DNS convention); strip it.
@@ -727,7 +807,6 @@ class CyclicSendTask(LimitedDurationCyclicSendTaskABC, RestartableCyclicTaskABC)
 
         self.transmit_api_url = f"{cansub.api_url}/can/{channel}/transmit"
         self._net_timeout = cansub._net_timeout
-        self.cansub_cert = cansub.cansub_cert
         self.session = cansub.session
 
         period_ms = int(len(self.messages) * self.period_ns / 1_000_000)
@@ -756,7 +835,7 @@ class CyclicSendTask(LimitedDurationCyclicSendTaskABC, RestartableCyclicTaskABC)
         }
 
         # Set up new transmit sequence
-        response = self.session.post(url=self.transmit_api_url, timeout=self._net_timeout, verify=self.cansub_cert,
+        response = self.session.post(url=self.transmit_api_url, timeout=self._net_timeout,
                                 json=transmit_sequence)
 
         if response.status_code != 201:
@@ -775,14 +854,13 @@ class CyclicSendTask(LimitedDurationCyclicSendTaskABC, RestartableCyclicTaskABC)
     def start(self) -> None:
         """Restart a stopped periodic task."""
         response = self.session.put(url=f"{self.transmit_api_url}/{self.transmit_id}/count", timeout=self._net_timeout,
-                                verify=self.cansub_cert, json=0)
+                                json=0)
         if response.status_code != 200:
             raise can.exceptions.CanOperationError(f"Failed to (re)start transmit sequence ({response.status_code})")
 
     def stop(self) -> None:
         """Stop periodic task."""
-        response = self.session.delete(url=f"{self.transmit_api_url}/{self.transmit_id}", timeout=self._net_timeout,
-                                   verify=self.cansub_cert)
+        response = self.session.delete(url=f"{self.transmit_api_url}/{self.transmit_id}", timeout=self._net_timeout)
         if response.status_code != 200:
             raise can.exceptions.CanOperationError(f"Failed to stop transmit sequence ({response.status_code})")
         return

@@ -6,6 +6,17 @@ This package registers the CANsub as a standard python-can interface, making it 
 
 > **Tip:** This README is optimized for LLMs. When using an AI coding assistant with this package, provide this file as context for accurate results.
 
+## Compatibility
+
+The python-can-cansub package and the CANsub device communicate over a versioned API. They are compatible when the package supports the API version used by the device firmware.
+
+- Each **python-can-cansub** release supports one API version. The supported API version for each release is listed in the [python-can-cansub changelog](CHANGELOG.md).
+- Each **CANsub firmware** release uses one API version. The API version for each firmware release is listed in the CANsub changelog (provided with the device).
+
+To check compatibility, look up the API version of the package release and of the device firmware release in their respective changelogs. If they match, the two are compatible.
+
+If the package finds a connected device whose API version it does not support, it emits a warning. Update the package or the device firmware so their API versions align.
+
 ## python-can API
 
 ### Installation
@@ -62,6 +73,12 @@ In the above example two CANsub devices are detected, each with two channels. On
 
 ### Opening a Bus
 
+> **Note:** `data_bitrate` is required even on a classic (non-FD) bus. On a non-FD bus, simply set it to e.g. `1_000_000` (1 Mbit/s).
+
+> **Tip:** Pass `listen_only=True` to `can.Bus` to monitor a bus without transmitting or acknowledging frames.
+
+> **Tip:** Pass `error_frames=True` to `can.Bus` to receive error frames.
+
 #### Single bus - hardcoded
 
 ```python
@@ -91,6 +108,22 @@ with (can.Bus(interface=configs[0]["interface"], channel=configs[0]["channel"], 
 >     pass
 > ```
 
+### TLS / Certificates
+
+The data connection to the device is secured by TLS. When connecting via an IP address (where hostname verification will fail), `server_cert=None` can be used to disable certificate validation:
+
+```python
+with can.Bus(interface="cansub", channel="192.168.1.10@1", server_cert=None, bitrate=250_000, data_bitrate=1_000_000) as bus:
+    pass
+```
+
+If TLS mutual authentication is enabled, `client_cert` can be used to provide a tuple of paths to the client certificate (`.crt` file) and its unencrypted private key (`.key` file), i.e. `("cert", "key")`:
+
+```python
+with can.Bus(**configs[0], client_cert=("/path/to/client.crt", "/path/to/client.key"), bitrate=250_000, data_bitrate=1_000_000) as bus:
+    pass
+```
+
 ### Receive and Transmit
 
 ```python
@@ -103,6 +136,20 @@ with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus:
     # Receive with timeout
     msg_rx = bus.recv(timeout=1.0)
     print(msg_rx)
+```
+
+### Error Frames
+
+Error frame reporting is disabled by default; enable it by passing `error_frames=True` to `can.Bus`. Bus errors are then received as a `can.Message` with `is_error_frame` set. The error type is encoded in `arbitration_id`, which can be converted to a `CanSubErrorFrameType` enum:
+
+```python
+from python_can_cansub import CanSubErrorFrameType
+
+with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000, error_frames=True) as bus:
+    msg = bus.recv(timeout=1.0)
+    if msg and msg.is_error_frame:
+        error_type = CanSubErrorFrameType(msg.arbitration_id)
+        print(f"Bus error: {error_type.name}")  # e.g. "Bus error: ACK"
 ```
 
 ### Filters
@@ -171,6 +218,28 @@ with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus:
     with can.LogReader("log.csv") as reader:
         for msg in can.MessageSync(messages=reader):
             bus.send(msg)
+```
+
+### CSV Logger
+
+On import, this package overrides the default python-can `.csv` reader and writer with a format compatible with the *webCAN* browser tool provided with the device. This applies automatically wherever `.csv` files are read or written, including `can.Logger`, `can.LogReader`, and the command-line tools.
+
+The writer (`CanSubCSVWriter`) and reader (`CanSubCSVReader`) can also be used directly:
+
+```python
+from python_can_cansub import CanSubCSVWriter, CanSubCSVReader
+
+# Write received messages to a webCAN-compatible CSV file
+with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus:
+    with CanSubCSVWriter("log.csv") as writer:
+        msg = bus.recv(timeout=1.0)
+        if msg:
+            writer.on_message_received(msg)
+
+# Read messages back from the CSV file
+with CanSubCSVReader("log.csv") as reader:
+    for msg in reader:
+        print(msg)
 ```
 
 ## python-can tools

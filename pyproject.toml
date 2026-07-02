@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "python-can-cansub"
-version = "2026.06.02"
+version = "2026.07.02"
 authors = [
     { name="CSS Electronics" },
     { email="contact@csselectronics.com" },
