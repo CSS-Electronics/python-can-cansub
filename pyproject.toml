@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "python-can-cansub"
-version = "2026.07.02"
+version = "2026.08.17"
 authors = [
     { name="CSS Electronics" },
     { email="contact@csselectronics.com" },
@@ -25,20 +25,30 @@ dependencies = [
     'zeroconf >= 0.131.0',
 ]
 
+[project.optional-dependencies]
+test = [
+    'pytest >= 8.0',
+]
+
 [project.entry-points."can.interface"]
 cansub = "python_can_cansub.cansub:CanSub"
 
 [project.entry-points."can.io.message_writer"]
-csv = "python_can_cansub.cansub:CanSubCSVWriter"
+csv = "python_can_cansub.cansub_csv:CanSubCSVWriter"
 
 [project.entry-points."can.io.message_reader"]
-csv = "python_can_cansub.cansub:CanSubCSVReader"
+csv = "python_can_cansub.cansub_csv:CanSubCSVReader"
 
 [project.urls]
 "Homepage" = "https://csselectronics.com/"
 "Source" = "https://github.com/CSS-Electronics/python-can-cansub"
+"Changelog" = "https://github.com/CSS-Electronics/python-can-cansub/blob/master/CHANGELOG.md"
 
 [tool.pytest.ini_options]
 pythonpath = [
-  "."
+  "src",
+  ".",
+]
+testpaths = [
+  "tests",
 ]

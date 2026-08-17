@@ -10,12 +10,12 @@ This package registers the CANsub as a standard python-can interface, making it 
 
 The python-can-cansub package and the CANsub device communicate over a versioned API. They are compatible when the package supports the API version used by the device firmware.
 
-- Each **python-can-cansub** release supports one API version. The supported API version for each release is listed in the [python-can-cansub changelog](CHANGELOG.md).
-- Each **CANsub firmware** release uses one API version. The API version for each firmware release is listed in the CANsub changelog (provided with the device).
+- Each **python-can-cansub** release supports one API version. The supported API version for each release is listed in the [python-can-cansub changelog](https://github.com/CSS-Electronics/python-can-cansub/blob/master/CHANGELOG.md).
+- Each **CANsub firmware** release uses one API version. The API version for each firmware release is listed in the CANsub changelog (provided with the device documentation).
 
-To check compatibility, look up the API version of the package release and of the device firmware release in their respective changelogs. If they match, the two are compatible.
+To check compatibility, look up the API version of the python-can-cansub release and of the device firmware release in their respective changelogs. If they match, they are compatible.
 
-If the package finds a connected device whose API version it does not support, it emits a warning. Update the package or the device firmware so their API versions align.
+Device *auto-detection* (see *Configuration*) skips devices with an unsupported API version and emits a `UserWarning`. Opening a bus on such a device raises `can.exceptions.CanInitializationError`. In either case, update the package or the device firmware so their API versions align.
 
 ## python-can API
 
@@ -35,16 +35,16 @@ import can
 
 ### Configuration
 
-Python-can defines a hardware *configuration* by an `interface` and a `channel` (a single interface can have multiple channels).
+In python-can, a hardware *configuration* is defined by an `interface` and a `channel` (a single interface can have multiple channels).
 
-The CANsub `interface` is fixed `"cansub"`. The `channel` is constructed from the device hostname (unique) and channel index.
+The CANsub `interface` is always `"cansub"`. The `channel` is constructed from the device's unique hostname and the channel index.
 
 | Connection | Hostname                | python-can `channel` string       |
 |------------|-------------------------|-----------------------------------|
 | USB        | `[DEVICE-ID]-usb.local` | `[DEVICE-ID]-usb.local@[channel]` |
 | Ethernet   | `[DEVICE-ID]-eth.local` | `[DEVICE-ID]-eth.local@[channel]` |
 
-The device-ID is printed on the device label. Channel indexing is **1-based** - the first channel is `1`.
+The `[DEVICE-ID]` is printed on the device label. Channel indexing is **1-based** - the first channel is `1`.
 
 A configuration is passed to `can.Bus` to open a bus.
 
@@ -59,7 +59,7 @@ configs = [{"interface": "cansub", "channel": "aabbccdd-usb.local@1"},
 
 #### Auto-detect
 
-Example of using `detect_available_configs` to automatically discover (uses mDNS) all connected CANsub devices and channels:
+Example of using `detect_available_configs` to automatically discover all connected CANsub devices and channels via mDNS:
 
 ```python
 configs = can.detect_available_configs(interfaces=["cansub"])
@@ -69,73 +69,51 @@ configs = can.detect_available_configs(interfaces=["cansub"])
 #       {"interface": "cansub", "channel": "11223344-eth.local@2"}]
 ```
 
-In the above example two CANsub devices are detected, each with two channels. One device is connected via USB and the other via Ethernet.
+In the above example, two CANsub devices are detected, each with two channels. One device is connected via USB and the other via Ethernet.
+
+> **Note:** mDNS discovery relies on inbound UDP port 5353. If a host firewall blocks it, no devices are detected (a fixed configuration still works).
 
 ### Opening a Bus
 
-> **Note:** `data_bitrate` is required even on a classic (non-FD) bus. On a non-FD bus, simply set it to e.g. `1_000_000` (1 Mbit/s).
+The python-can-cansub constructor implements the required arguments for can.Bus and adds custom arguments specific to python-can-cansub. See the python-can-cansub constructor docstring for additional information.
 
-> **Tip:** Pass `listen_only=True` to `can.Bus` to monitor a bus without transmitting or acknowledging frames.
-
-> **Tip:** Pass `error_frames=True` to `can.Bus` to receive error frames.
-
-#### Single bus - hardcoded
+A bus is opened by passing a configuration to `can.Bus`:
 
 ```python
 with can.Bus(interface="cansub", channel="aabbccdd-usb.local@1", bitrate=250_000, data_bitrate=1_000_000) as bus:
     pass
 ```
 
-#### Single bus - from configs
+`**config` unpacks a config dict directly into `can.Bus` keyword arguments - convenient with auto-detected configs, and for opening multiple buses:
 
 ```python
-with can.Bus(interface=configs[0]["interface"], channel=configs[0]["channel"], bitrate=250_000, data_bitrate=1_000_000) as bus:
+with (can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus1,
+      can.Bus(**configs[1], bitrate=250_000, data_bitrate=1_000_000) as bus2):
     pass
 ```
 
-#### Multiple buses - from configs
+### Bit Timing
+
+`bitrate` and `data_bitrate` configure the bus with a fixed sample point of 80%. For full control of the bit timing (sample point, SJW), pass a `can.BitTiming` (classic CAN) or `can.BitTimingFd` (CAN FD) as `timing` instead. The CANsub CAN clock is 80 MHz:
 
 ```python
-with (can.Bus(interface=configs[0]["interface"], channel=configs[0]["channel"], bitrate=250_000, data_bitrate=1_000_000) as bus1,
-      can.Bus(interface=configs[1]["interface"], channel=configs[1]["channel"], bitrate=250_000, data_bitrate=1_000_000) as bus2):
+timing = can.BitTimingFd.from_sample_point(f_clock=80_000_000,
+                                           nom_bitrate=250_000, nom_sample_point=87.5,
+                                           data_bitrate=1_000_000, data_sample_point=87.5)
+
+with can.Bus(**configs[0], timing=timing) as bus:
     pass
 ```
-
-> **Tip:** `**config` unpacks a config dict directly into `can.Bus` keyword arguments:
->
-> ```python
-> with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus:
->     pass
-> ```
 
 ### TLS / Certificates
 
-The data connection to the device is secured by TLS. When connecting via an IP address (where hostname verification will fail), `server_cert=None` can be used to disable certificate validation:
+The data connection to the device is secured by TLS, with the device certificate verified against the built-in CANsub root certificate. When connecting via an IP address (which carries no name to verify the certificate hostname against), hostname verification is automatically disabled - the certificate chain is still verified.
 
-```python
-with can.Bus(interface="cansub", channel="192.168.1.10@1", server_cert=None, bitrate=250_000, data_bitrate=1_000_000) as bus:
-    pass
-```
-
-If TLS mutual authentication is enabled, `client_cert` can be used to provide a tuple of paths to the client certificate (`.crt` file) and its unencrypted private key (`.key` file), i.e. `("cert", "key")`:
+When TLS mutual authentication is enabled, `client_cert` can be used to provide a tuple of paths to the client certificate (`.crt` file) and its unencrypted private key (`.key` file):
 
 ```python
 with can.Bus(**configs[0], client_cert=("/path/to/client.crt", "/path/to/client.key"), bitrate=250_000, data_bitrate=1_000_000) as bus:
     pass
-```
-
-### Receive and Transmit
-
-```python
-with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus:
-    
-    # Transmit
-    msg_tx = can.Message(is_extended_id=False, arbitration_id=0x123, data=[0x01, 0x02, 0x03, 0x04])
-    bus.send(msg_tx)
-    
-    # Receive with timeout
-    msg_rx = bus.recv(timeout=1.0)
-    print(msg_rx)
 ```
 
 ### Error Frames
@@ -150,6 +128,15 @@ with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000, error_frames
     if msg and msg.is_error_frame:
         error_type = CanSubErrorFrameType(msg.arbitration_id)
         print(f"Bus error: {error_type.name}")  # e.g. "Bus error: ACK"
+```
+
+### Bus State
+
+`bus.state` queries the current channel state: `can.BusState.ACTIVE` (error-active or error-warning), `can.BusState.PASSIVE` (error-passive), or `can.BusState.ERROR` (bus-off). Reading the state of a stopped channel (e.g. after a connection loss) or of a closed bus raises `can.exceptions.CanOperationError`:
+
+```python
+with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus:
+    print(bus.state)  # e.g. "BusState.ACTIVE"
 ```
 
 ### Filters
@@ -168,6 +155,65 @@ with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000, can_filters=
 ```
 
 > **Tip:** Applying hardware filters reduces the network load between the CANsub and the connected client.
+
+### Receive and Transmit
+
+A bus receives the messages transmitted by the other nodes on the CAN bus. Messages transmitted by the bus itself are not received, unless the bus is opened with `receive_own_messages=True`.
+
+```python
+with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus:
+
+    # Transmit
+    msg_tx = can.Message(is_extended_id=False, arbitration_id=0x123, data=[0x01, 0x02, 0x03, 0x04])
+    bus.send(msg_tx)
+
+    # Receive with timeout
+    msg_rx = bus.recv(timeout=1.0)
+    print(msg_rx)
+```
+
+#### CAN FD
+
+CAN FD frames are transmitted by setting `is_fd` (and typically `bitrate_switch`, which switches to `data_bitrate` for the payload). FD payloads can be up to 64 bytes. Transmitting an FD frame requires the bus to be opened with a `data_bitrate` (or an FD bit timing); on a classic CAN bus, FD transmission raises `can.exceptions.CanOperationError`:
+
+```python
+with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus:
+    msg_fd = can.Message(is_extended_id=False, arbitration_id=0x123,
+                         is_fd=True, bitrate_switch=True, data=bytes(range(64)))
+    bus.send(msg_fd)
+```
+
+### Error Handling
+
+Operations on a failed bus raise `can.exceptions.CanOperationError`: `send()` and `recv()` raise it once the connection to the device is lost (detected within seconds, also on an idle bus). `send()` additionally raises `can.exceptions.CanTimeoutError` when the transmit queue stays full for the full timeout (back-pressure from a slow or blocked CAN bus). Failures to open a bus raise `can.exceptions.CanInitializationError`.
+
+A failed bus does not recover, and the package does not reconnect automatically. To recover from a connection loss, close the failed bus and open a new one:
+
+```python
+try:
+    msg = bus.recv(timeout=1.0)
+except can.CanOperationError:
+    # Connection lost: the bus cannot recover - close it and open a new one
+    bus.shutdown()
+    bus = can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000)
+```
+
+### Closing a Bus
+
+Closing a bus (leaving the `with` block, or calling `bus.shutdown()`) waits up to `shutdown_timeout` seconds for the queued messages to be transmitted before asking the device to discard them (see the *Opening a Bus*).
+
+Messages received up to (and during) the close remain retrievable with `recv()` after the bus is closed - drain until `None`:
+
+```python
+with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus:
+    bus.send(can.Message(is_extended_id=False, arbitration_id=0x123, data=[0x01, 0x02, 0x03, 0x04]))
+
+# The bus is closed (all queued messages transmitted)
+```
+
+> **Tip:** When two buses are connected to the same physical CAN bus (e.g. a transmitter and a receiver), close the transmitting bus first - closing it waits for the queued messages to be transmitted, which requires the other (acknowledging) bus to still be open.
+
+> **Tip:** A `can.Notifier` stops dispatching the moment it is stopped - received messages not yet dispatched are discarded (python-can behavior). Stop the notifier only once the traffic has settled, or read the messages with `recv()` instead.
 
 ### Notifier and Listeners
 
@@ -189,15 +235,17 @@ with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus:
 
 Periodic transmission jobs can be started with `bus.send_periodic()`.
 
-Most periodic transmission job types can be offloaded to the CANsub hardware, providing much better transmission time accuracy (compared to a host-scheduled transmission). A host-side background task is used only as a fallback when hardware transmission is not available.
+Periodic transmission is offloaded to the CANsub hardware where possible, providing much better transmission time accuracy than a host-scheduled transmission. A host-side background task is used only as a fallback when hardware transmission is not available.
+
+> **Note:** python-can requires all messages in a periodic task to share the same arbitration ID (the payload can differ per frame).
 
 ```python
 from time import sleep
 
 msgs = [
     can.Message(is_extended_id=False, arbitration_id=0x123, data=[0x01, 0x02, 0x03, 0x04]),
-    can.Message(is_extended_id=False, arbitration_id=0x124, data=[0x05, 0x06, 0x07, 0x08]),
-    can.Message(is_extended_id=False, arbitration_id=0x125, data=[0x09, 0x0A, 0x0B, 0x0C]),
+    can.Message(is_extended_id=False, arbitration_id=0x123, data=[0x05, 0x06, 0x07, 0x08]),
+    can.Message(is_extended_id=False, arbitration_id=0x123, data=[0x09, 0x0A, 0x0B, 0x0C]),
 ]
 
 with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus:
@@ -209,7 +257,7 @@ with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus:
     sleep(6)
 ```
 
-### Replaying files
+### Replaying Files
 
 `can.MessageSync` can be used to replay messages from a log file.
 
@@ -242,9 +290,9 @@ with CanSubCSVReader("log.csv") as reader:
         print(msg)
 ```
 
-## python-can tools
+## python-can Tools
 
-python-can includes several command line tools. All tools accept `--interface` and `--channel` to select the bus, following the same configuration as the API.
+python-can includes several command-line tools. All tools accept `--interface` and `--channel` to select the bus, following the same configuration as the API.
 
 The common argument pattern for the CANsub:
 
@@ -252,7 +300,15 @@ The common argument pattern for the CANsub:
 --interface cansub --channel aabbccdd-usb.local@1 --bitrate 250000 --data-bitrate 1000000
 ```
 
-Note that the *filter* argument supported by some command-line tools is limited to standard (11-bit) CAN IDs. Filtering on extended (29-bit) IDs requires the python-can API.
+Bus arguments without a dedicated command-line flag are passed with `--bus-kwargs key=value ...`. For example, listen-only monitoring:
+
+```
+--interface cansub --channel 192.168.1.10@1 --bitrate 250000 --data-bitrate 1000000 --bus-kwargs listen_only=True
+```
+
+> **Note:** `--bus-kwargs` consumes all values that follow it; place positional arguments (e.g. the `can_player` log file) before it.
+
+Note that the *filter* argument supported by some command-line tools matches both standard (11-bit) and extended (29-bit) CAN IDs.
 
 ### can_logger
 
@@ -278,11 +334,11 @@ Live terminal viewer showing received frames, updated counts, timestamps, and by
 can_viewer --interface cansub --channel aabbccdd-usb.local@1 --bitrate 250000 --data-bitrate 1000000
 ```
 
-On Windows, the can_viewer requires `windows-curses` (`pip install windows-curses`).
+On Windows, `can_viewer` requires `windows-curses` (`pip install windows-curses`).
 
 ### can_bridge
 
-Forward all frames received on one bus to another (e.g. bridge two CANsub channels):
+Forward all frames received on one bus to another (e.g., to bridge two CANsub channels):
 
 ```bash
 can_bridge --bus1-interface cansub --bus1-channel aabbccdd-usb.local@1 --bus1-bitrate 250000 --bus1-data-bitrate 1000000 \
@@ -303,7 +359,7 @@ The following packages complement `python-can-cansub` and are included here as i
 
 ### cantools
 
-[cantools](https://github.com/cantools/cantools) is a Python package for encoding and decoding CAN messages. Encoding/decoding rules can be created or loaded from DBC (and other) database files. It works directly with `can.Message` objects from python-can.
+[cantools](https://github.com/cantools/cantools) is a Python package for encoding and decoding CAN messages. Encoding/decoding rules can be created directly in code, or loaded from DBC and other database file formats. It works directly with `can.Message` objects from python-can.
 
 #### Installation
 
@@ -317,20 +373,23 @@ A database can be constructed directly in Python without a database file:
 
 ```python
 import cantools
-
-db = cantools.database.Database()
+from cantools.database.conversion import LinearConversion
 
 msg_def = cantools.database.can.Message(
     frame_id=0x123,
     name="Message1",
     length=8,
     signals=[
-        cantools.database.can.Signal(name="Signal1", start=0,  length=16, scale=0.1, offset=0.0, minimum=0.0, maximum=100.0),
-        cantools.database.can.Signal(name="Signal2", start=16, length=16, scale=0.1, offset=0.0, minimum=0.0, maximum=100.0),
+        cantools.database.can.Signal(name="Signal1", start=0, length=16,
+                                     conversion=LinearConversion(scale=0.1, offset=0.0, is_float=False),
+                                     minimum=0.0, maximum=100.0),
+        cantools.database.can.Signal(name="Signal2", start=16, length=16,
+                                     conversion=LinearConversion(scale=0.1, offset=0.0, is_float=False),
+                                     minimum=0.0, maximum=100.0),
     ]
 )
 
-db.add_message(msg_def)
+db = cantools.database.Database(messages=[msg_def])
 ```
 
 #### Load database from DBC file

@@ -1,8 +1,11 @@
 import binascii
+import logging
 import can
 from enum import IntEnum
 from typing import Callable
 from can.util import len2dlc, dlc2len
+
+logger = logging.getLogger("can.cansub")
 
 HDLC_BOUNDARY_BYTE = 0x7E
 HDLC_ESCAPE_BYTE = 0x7D
@@ -111,10 +114,10 @@ def frames_decode(data: bytearray, msg_cb: Callable[[can.Message], None]) -> Non
                 break
         except Exception as e:
             # Some error. Bytes consumed?
-            print(f"Error decoding frame {e}")
+            logger.warning("Error decoding frame (%s)", e)
             if data_len_pre == len(data):
                 # No, likely deadlock, reset buffer
-                data = bytearray()
+                data.clear()
                 break
 
 def frame_decode(data: bytearray, msg_cb: Callable[[can.Message], None]) -> None:
@@ -189,7 +192,7 @@ def messages_decode(data: bytearray, msg_cb: Callable[[can.Message], None]) -> N
             message_decode(data, msg_cb)
             result = True
         except Exception as e:
-            print(f"Error decoding message {e}")
+            logger.warning("Error decoding message (%s)", e)
             result = False
             break
 
