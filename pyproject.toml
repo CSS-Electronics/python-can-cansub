@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "python-can-cansub"
-version = "2026.08.17"
+version = "2026.09.24"
 authors = [
     { name="CSS Electronics" },
     { email="contact@csselectronics.com" },
@@ -38,6 +38,10 @@ csv = "python_can_cansub.cansub_csv:CanSubCSVWriter"
 
 [project.entry-points."can.io.message_reader"]
 csv = "python_can_cansub.cansub_csv:CanSubCSVReader"
+
+# Ship the README inside the installed package so it can be found and read locally.
+[tool.hatch.build.targets.wheel.force-include]
+"README.md" = "python_can_cansub/README.md"
 
 [project.urls]
 "Homepage" = "https://csselectronics.com/"

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2026.09.24 (API 05.00)
+
+### Added
+- `README.md` is now shipped inside the installed package (`python_can_cansub/README.md`)
+
+### Changed
+- Supported device API version changed from `04.00` to `05.00`.
+
 ## 2026.08.17 (API 04.00)
 
 ### Added

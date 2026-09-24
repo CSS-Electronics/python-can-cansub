@@ -87,8 +87,13 @@ class _WakeupQueue(queue.Queue):
         super()._put(item)
 
 class CanSub(can.BusABC):
+    """
+    python-can bus for a CANsub device (``can.Bus(interface="cansub", ...)``).
 
-    _supported_api_versions = ["04.00"]
+    Full documentation with usage examples: ``README.md`` in this package directory.
+    """
+
+    _supported_api_versions = ["05.00"]
     _can_f_clock = 80_000_000
     _can_default_sp = 80.0
     _net_timeout = 3.0
@@ -165,6 +170,8 @@ class CanSub(can.BusABC):
         :param max_device_time_skew:
             On open, set the device clock to the host time (UTC) if the two differ by more than this many
             seconds. Default: 1.0, always set: 0.0, never set: None
+            Note: setting the device clock overrides and disables the device time synchronization (PTP)
+            for the rest of the device power cycle. Use None to leave a PTP-synchronized clock untouched.
 
         :param shutdown_timeout:
             On shutdown, time (seconds) to transmit queued messages.
@@ -388,7 +395,8 @@ class CanSub(can.BusABC):
                     time_json = self._api_request("GET", "/time", "Failed to get device time",
                                                   error_type=can.exceptions.CanInitializationError)
                     try:
-                        device_time = datetime.fromisoformat(time_json.replace("Z", "+00:00"))
+                        # {"utc": "YYYY-MM-DDTHH:MM:SS.sssZ", "rate_ppb": <int>}
+                        device_time = datetime.fromisoformat(time_json["utc"].replace("Z", "+00:00"))
                     except Exception as e:
                         raise can.exceptions.CanInitializationError(f"Failed to get device time ({e})")
 
@@ -397,7 +405,9 @@ class CanSub(can.BusABC):
 
                 if set_time:
                     time_string = datetime.now(timezone.utc).isoformat(timespec="milliseconds")[:-6] + "Z"
-                    self._api_request("PUT", "/time", "Failed to set device time", json=time_string,
+                    # No clock rate correction is known by the host: rate_ppb is always 0
+                    self._api_request("PUT", "/time", "Failed to set device time",
+                                      json={"utc": time_string, "rate_ppb": 0},
                                       error_type=can.exceptions.CanInitializationError)
 
             # Ensure that no hardware filters are set before the channel is opened

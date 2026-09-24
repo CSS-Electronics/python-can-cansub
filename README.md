@@ -92,6 +92,17 @@ with (can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus1,
     pass
 ```
 
+### Device Time
+
+On open, the device clock is compared to the host clock and set to the host time (UTC) if the two differ by more than `max_device_time_skew` seconds (default `1.0`). Pass `0.0` to always set the device clock, or `None` to never set it.
+
+> **Note:** Setting the device clock overrides and disables the device time synchronization (PTP) for the rest of the device power cycle. When using PTP, pass `max_device_time_skew=None` to leave the synchronized device clock untouched:
+
+```python
+with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000, max_device_time_skew=None) as bus:
+    pass
+```
+
 ### Bit Timing
 
 `bitrate` and `data_bitrate` configure the bus with a fixed sample point of 80%. For full control of the bit timing (sample point, SJW), pass a `can.BitTiming` (classic CAN) or `can.BitTimingFd` (CAN FD) as `timing` instead. The CANsub CAN clock is 80 MHz:
@@ -170,6 +181,26 @@ with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000) as bus:
     # Receive with timeout
     msg_rx = bus.recv(timeout=1.0)
     print(msg_rx)
+```
+
+#### TX Acknowledgement
+
+With `receive_own_messages=True`, the bus receives its own transmitted messages (marked with `is_rx=False`) once they have been acknowledged on the CAN bus. This tx-ack can be used to wait for a message to be transmitted before proceeding, e.g. transmitting the next message:
+
+```python
+msgs = [
+    can.Message(is_extended_id=False, arbitration_id=0x123, data=[0x01, 0x02, 0x03, 0x04]),
+    can.Message(is_extended_id=False, arbitration_id=0x123, data=[0x05, 0x06, 0x07, 0x08]),
+]
+
+with can.Bus(**configs[0], bitrate=250_000, data_bitrate=1_000_000, receive_own_messages=True) as bus:
+    for msg_tx in msgs:
+        # Transmit
+        bus.send(msg_tx)
+
+        # Wait for the tx-ack before transmitting the next message
+        msg_ack = bus.recv()
+        print(msg_ack)
 ```
 
 #### CAN FD

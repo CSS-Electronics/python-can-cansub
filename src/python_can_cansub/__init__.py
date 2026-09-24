@@ -1,3 +1,11 @@
+"""
+python-can interface for the CSS Electronics CANsub CAN bus interfaces (``interface="cansub"``),
+including a webCAN-compatible CSV reader/writer that replaces the python-can default for ``.csv`` files.
+
+Full documentation with usage examples: ``README.md`` in this package directory
+(``importlib.resources.files("python_can_cansub") / "README.md"``).
+"""
+
 from can.io.logger import MESSAGE_WRITERS
 from can.io.player import MESSAGE_READERS
 
