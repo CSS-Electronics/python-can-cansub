@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "python-can-cansub"
-version = "2026.09.24"
+version = "2026.09.25"
 authors = [
     { name="CSS Electronics" },
     { email="contact@csselectronics.com" },
@@ -49,10 +49,6 @@ csv = "python_can_cansub.cansub_csv:CanSubCSVReader"
 "Changelog" = "https://github.com/CSS-Electronics/python-can-cansub/blob/master/CHANGELOG.md"
 
 [tool.pytest.ini_options]
-pythonpath = [
-  "src",
-  ".",
-]
 testpaths = [
   "tests",
 ]

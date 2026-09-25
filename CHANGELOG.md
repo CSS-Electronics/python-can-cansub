@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2026.09.25 (API 05.00)
+
+### Changed
+- `send()` now transmits messages with `is_rx=False` (previously ignored by the device as transmission acknowledgements),
+  e.g. messages forwarded from SocketCAN, or transmitted messages replayed from log files.
+
 ## 2026.09.24 (API 05.00)
 
 ### Added

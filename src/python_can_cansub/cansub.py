@@ -918,6 +918,7 @@ class CanSub(can.BusABC):
         # (copy.deepcopy would copy it, but is ~4x slower on this per-frame path.)
         msg_copy = copy.copy(msg)
         msg_copy.data = bytearray(msg.data or b"")
+        msg_copy.is_rx = True  # CANsub only transmits messages with is_rx=True (it considers is_rx=False to be tx acks)
         msg = msg_copy
 
         try:

@@ -60,6 +60,24 @@ class TestSendRecv:
             # Test that no message arrives at the transmitting channel
             assert bus_tx.recv(timeout=0.5) is None, "unexpected own message (tx ack) received"
 
+    @pytest.mark.parametrize("is_rx", [False, True], ids=["is_rx=False", "is_rx=True"])
+    def test_send_is_rx(self, bus_config, is_rx):
+        """
+        Test that messages provided to send are always transmitted, regardless of the is_rx value.
+        NOTE: The CANsub hardware device considers is_rx=False to be transmission acknowledgements and ignores those.
+        """
+        with can.Bus(channel=1, **bus_config) as bus_rx, can.Bus(channel=2, **bus_config) as bus_tx:
+
+            msg = can.Message(arbitration_id=0x123, is_extended_id=False, data=[1, 2], is_rx=is_rx)
+
+            bus_tx.send(msg)
+
+            assert msg.is_rx is is_rx, "message was modified by send"
+
+            rx = bus_rx.recv(timeout=2.0)
+            assert rx is not None, "message not received"
+            assert rx.is_rx is True, "received message has is_rx False"
+
     def test_high_load(self, bus_config):
         """Test that messages sent at full blast arrive exactly once, in order - including the messages still queued
         when the transmitting exits to open-scope.

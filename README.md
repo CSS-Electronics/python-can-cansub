@@ -369,12 +369,26 @@ On Windows, `can_viewer` requires `windows-curses` (`pip install windows-curses`
 
 ### can_bridge
 
-Forward all frames received on one bus to another (e.g., to bridge two CANsub channels):
+> **Warning:** When bridging a CANsub, never enable `receive_own_messages`, as this forwards the transmission acknowledgements.
+
+Forward all frames received on one bus to another, in both directions. A CANsub channel can be bridged to any python-can compatible interface.
+
+For example, on Linux, bridge channel 1 to a SocketCAN virtual interface `vcan1`, making it available to SocketCAN tools such as `candump`:
 
 ```bash
-can_bridge --bus1-interface cansub --bus1-channel aabbccdd-usb.local@1 --bus1-bitrate 250000 --bus1-data-bitrate 1000000 \
-           --bus2-interface cansub --bus2-channel aabbccdd-usb.local@2 --bus2-bitrate 250000 --bus2-data-bitrate 1000000
+sudo ip link add dev vcan1 type vcan && sudo ip link set vcan1 up
+
+can_bridge --bus1-interface cansub --bus1-channel aabbccdd-usb.local@1 --bus1-bitrate 250000 \
+           --bus2-interface socketcan --bus2-channel vcan1
 ```
+
+In a separate terminal, show the frames on `vcan1`:
+
+```bash
+candump vcan1
+```
+
+> **Note:** `vcan` does not support the device provided timestamps. The timestamps of frames on `vcan1` are the host time of reception.
 
 ### can_logconvert
 
